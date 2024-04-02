@@ -53,6 +53,8 @@ jobs:
       matrix:
         build:
           - aarch64-linux-android
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
           - linux-x64-gnu
           - linux-x64-musl
           - macos-x64
@@ -62,6 +64,14 @@ jobs:
           - build: aarch64-linux-android
             os: ubuntu-latest
             target: aarch64-linux-android
+            cargo: cross
+          - build: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            target: aarch64-unkown-linux-gnu
+            cargo: cross
+          - build: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
             cargo: cross
           - build: linux-x64-gnu
             os: ubuntu-latest
