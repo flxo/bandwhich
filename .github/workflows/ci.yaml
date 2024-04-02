@@ -66,6 +66,14 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cross build --target aarch64-linux-android --verbose
 
+      - name: Build target aarch64-unknown-linux-gnu
+        if: matrix.os == 'ubuntu-latest'
+        run: cross build --target aarch64-unknown-linux-gnu --verbose
+
+      - name: Build target aarch64-unknown-linux-musl
+        if: matrix.os == 'ubuntu-latest'
+        run: cross build --target aarch64-unknown-linux-musl --verbose
+
       # This is useful for debugging problems when the expected build artifacts
       # (like shell completions and man pages) aren't generated.
       - name: Show build.rs stderr
