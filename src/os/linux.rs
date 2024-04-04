@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, net};
 
-use procfs::process::FDTarget;
+use procfs::net::{TcpNetEntry, UdpNetEntry};
 
 use crate::{
     network::{LocalSocket, Protocol},
@@ -9,43 +9,67 @@ use crate::{
 };
 
 pub(crate) fn get_open_sockets() -> OpenSockets {
-    let mut open_sockets = HashMap::new();
-    let mut inode_to_proc = HashMap::new();
+    let Ok(processes) = procfs::process::all_processes() else {
+        return OpenSockets {
+            sockets_to_procs: HashMap::new(),
+        };
+    };
 
-    if let Ok(all_procs) = procfs::process::all_processes() {
-        for process in all_procs.filter_map(|res| res.ok()) {
-            let Ok(fds) = process.fd() else { continue };
-            let Ok(stat) = process.stat() else { continue };
-            let proc_name = stat.comm;
-            let proc_info = ProcessInfo::new(&proc_name, stat.pid as u32);
-            for fd in fds.filter_map(|res| res.ok()) {
-                if let FDTarget::Socket(inode) = fd.target {
-                    inode_to_proc.insert(inode, proc_info.clone());
-                }
-            }
+    let sockets_to_procs = processes
+        .filter_map(Result::ok)
+        .filter_map(|process| {
+            // Collect the network entries from the process specific table
+            let tcp_entries = process
+                .tcp()
+                .unwrap_or_default()
+                .into_iter()
+                .chain(process.tcp6().unwrap_or_default())
+                .map(Entry::Tcp);
+            let udp_entries = process
+                .udp()
+                .unwrap_or_default()
+                .into_iter()
+                .chain(process.udp6().unwrap_or_default())
+                .map(Entry::Udp);
+
+            let entries = tcp_entries.chain(udp_entries);
+
+            process.stat().ok().map(|stat| {
+                entries.map(move |entry| {
+                    let proc_info = ProcessInfo::new(&stat.comm, stat.pid as u32);
+                    let socket = LocalSocket {
+                        ip: entry.local_address().ip(),
+                        port: entry.local_address().port(),
+                        protocol: entry.protocol(),
+                    };
+                    (socket, proc_info)
+                })
+            })
+        })
+        .flatten()
+        .collect();
+
+    OpenSockets { sockets_to_procs }
+}
+
+/// Helper to treap Udp and Tcp entries as one type
+enum Entry {
+    Tcp(TcpNetEntry),
+    Udp(UdpNetEntry),
+}
+
+impl Entry {
+    fn local_address(&self) -> net::SocketAddr {
+        match self {
+            Entry::Tcp(entry) => entry.local_address,
+            Entry::Udp(entry) => entry.local_address,
         }
     }
 
-    macro_rules! insert_proto {
-        ($source: expr, $proto: expr) => {
-            let entries = $source.into_iter().filter_map(|res| res.ok()).flatten();
-            for entry in entries {
-                if let Some(proc_info) = inode_to_proc.get(&entry.inode) {
-                    let socket = LocalSocket {
-                        ip: entry.local_address.ip(),
-                        port: entry.local_address.port(),
-                        protocol: $proto,
-                    };
-                    open_sockets.insert(socket, proc_info.clone());
-                }
-            }
-        };
-    }
-
-    insert_proto!([procfs::net::tcp(), procfs::net::tcp6()], Protocol::Tcp);
-    insert_proto!([procfs::net::udp(), procfs::net::udp6()], Protocol::Udp);
-
-    OpenSockets {
-        sockets_to_procs: open_sockets,
+    fn protocol(&self) -> Protocol {
+        match self {
+            Entry::Tcp(_) => Protocol::Tcp,
+            Entry::Udp(_) => Protocol::Udp,
+        }
     }
 }
